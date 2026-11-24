@@ -2,7 +2,7 @@
 
 A build spec for a coding model. Paste it into the model, in an empty repository, and build it one step at a time.
 
-`gf` is a checker for repositories where coding agents work. A ticket is split into small specs. A person approves each spec and its tests before any code is written. Every rule is checked by a script, in the terminal and in CI. No model judges anything, and no agent hooks are used.
+`gf` is a checker for repositories where coding agents work. A ticket is split into small specs. A large ticket gets a short design first. A person approves each spec and its tests before any code is written. Every rule is checked by a script, in the terminal and in CI. No model judges anything, and no agent hooks are used.
 
 ## 0. How to work through this spec
 
@@ -27,6 +27,10 @@ Change these values before the build. They all end up in `.gf/config.json`; noth
 | `test_globs` | `["tests/**"]` | Where test files live |
 | `free_paths` | `["specs/**", "README.md", "docs/**"]` | Paths that need no spec |
 | `test_command` | `["python3", "-m", "pytest", "-q"]` | How the tests run |
+| `design_min_points` | `5` | A ticket with this estimate or more needs a design. 0 turns it off |
+| `design_min_specs` | `4` | A ticket with this many specs or more needs a design. 0 turns it off |
+| `skills_dirs` | `["skills"]` | Where the skills a spec may name live |
+| `gates` | `["git"]` | The kinds of approval this repository accepts (section 5) |
 
 ## 2. Constraints
 
@@ -42,9 +46,12 @@ Change these values before the build. They all end up in `.gf/config.json`; noth
 .gf/gf.py                     the checker
 .gf/config.json               the settings of section 1
 .gf/templates/spec.md         an empty spec
+.gf/templates/design.md       an empty design
+skills/<name>/SKILL.md        how this repository does a recurring kind of work
 AGENTS.md                     the working agreement for agents (step 8)
 specs/<TICKET>-<slug>/
-  story.md                    the ticket: key, title, list of specs
+  story.md                    the ticket: key, title, estimate, list of specs
+  design.md                   only for a large ticket
   S1-<slug>.md                one small spec
   S2-<slug>.md
 selftest.py                   the scenarios of section 7
@@ -60,6 +67,7 @@ Front matter is the block between the first two `---` lines. Parse it by hand: o
 ---
 ticket: DATA-123
 title: Add sales_channel to the sales dataset
+points: 3
 ---
 
 ## Specs
@@ -75,6 +83,7 @@ title: Add the column to the table
 status: draft
 size: S
 scope: [src/loader/transform.py]
+skills: [python-parsing]
 ---
 
 ## Intent
@@ -93,7 +102,26 @@ One or two sentences.
 
 - `status` is `draft`, `approved` or `done`.
 - A requirement line matches `- R<n>: <text>`. The text must contain `THE SYSTEM SHALL`, alone or after a clause that starts with `WHEN`, `WHILE`, `IF` or `WHERE` and ends with a comma.
-- Approval adds three keys: `approved_by`, `approved_spec_sha`, `locked_tests`.
+- `skills` is optional. Each name must exist as `<skills_dir>/<name>/SKILL.md`. The agent reads those files before it writes code.
+- A line that holds `[NEEDS CLARIFICATION: <question>]` marks an open question. Write one instead of guessing.
+- Approval adds four keys: `approved_by`, `approved_via`, `approved_spec_sha`, `locked_tests`.
+
+**`design.md`**, only when the ticket is large: `points` is at least `design_min_points`, or the ticket has at least `design_min_specs` specs.
+
+```markdown
+---
+ticket: DATA-123
+status: draft
+---
+
+## Approach
+## Alternatives
+## Delivery order
+## Risks
+```
+
+- All four sections must have text. `status` is `draft` or `approved`.
+- Approval adds `approved_by`, `approved_via` and `approved_design_sha`.
 
 **A test tag.** Any line in a test file that holds the word `req` and a requirement id links the file to that requirement. This works in every language:
 
@@ -107,7 +135,7 @@ One or two sentences.
 
 **Hashes.** Use SHA-256 and keep the first 16 hex characters.
 - File hash: over the file's bytes, after replacing `\r\n` with `\n`.
-- Spec hash: over the spec's text without the lines `status`, `approved_by`, `approved_spec_sha` and `locked_tests`.
+- Spec hash: over the spec's text without the approval lines: `status` and every key that starts with `approved_`, plus `locked_tests`. The design hash is computed the same way.
 - `locked_tests` is a list of `path@filehash`.
 
 **Globs.** `**` matches any number of folders, `*` matches inside one path segment.
@@ -119,31 +147,38 @@ Local rules run on the files. Git rules run only with `--ci`, on the commits bet
 | Code | Where | Fails when |
 |---|---|---|
 | D1 | local | A `specs/` folder has no `story.md`, its `ticket` does not match `ticket_pattern`, a spec file is not listed under `## Specs`, or a spec id does not start with the folder's ticket |
+| D3 | local | A large ticket has a spec that is `approved` or `done`, and its `design.md` is missing, not approved, or changed after approval. Or a `design.md` lacks a section |
 | D2 | local | `size` is not in `sizes`, there are more than `max_requirements` requirements or more than `max_scope` scope entries, or a scope entry starts with `*` |
 | S1 | local | Intent, Non-goals, Edge cases or Requirements is missing or empty, or Edge cases comes after Requirements |
 | S2 | local | A requirement does not have the form of section 4, or two requirements share a number |
+| S3 | local | A spec names a skill that does not exist in `skills_dirs` |
+| S4 | local | A spec or design that is `approved` holds an open question |
 | T1 | local | A spec is `approved` or `done` and one of its requirements has no tagged test |
 | T2 | local | A tag names a requirement that does not exist |
 | T3 | local | One test file is tagged for two different specs |
 | G1 | local | A spec is `approved` or `done` and `approved_by` is missing or not in `humans`, or `approved_spec_sha` is not the current spec hash |
 | G2 | local | A file in `locked_tests` is missing or its hash changed, or a file tagged for an approved spec is not in `locked_tests` |
-| G3 | git | The commit that last changed a spec's `approved_spec_sha` was not written by one of `humans` |
+| G3 | git | The commit that last changed a spec's `approved_spec_sha`, or a design's `approved_design_sha`, was not written by one of `humans` |
+| G5 | local | `approved_via` names a gate that is not in `gates` |
 | C1 | git | A commit changes a file outside the `scope` of the spec it names. That spec's own test files are allowed |
 | C2 | git | A commit changes a file outside `free_paths` and `test_globs`, and names no spec, or names one that is not approved |
-| P1 | git | A commit changes `.gf/**`, `AGENTS.md` or a CI file, and its author is not one of `humans` |
+| P1 | git | A commit changes `.gf/**`, `skills/**`, `AGENTS.md` or a CI file, and its author is not one of `humans` |
+| D4 | git | A commit changes `points` in a `story.md` that already exists on the source branch, and its author is not one of `humans` |
 
-A `draft` spec is checked for D and S rules only, plus G2 if it still has `locked_tests`.
+A `draft` spec is checked for D1, D2, S1, S2 and S3 only, plus G2 if it still has `locked_tests`.
+
+**Gates.** A gate is a kind of proof that a person approved, and a way to check it. `gates` lists the kinds this repository accepts, and `approved_via` records the one used. The list lives in the config, never in the spec, so an agent cannot choose a weaker gate. This build has one gate, `git`: the proof is the approval lines, committed by one of `humans` (G1, G3). To add another gate later, for example a comment in your ticket tracker, keep one rule: the approval must name the spec hash and the hashes of the locked tests, so that it approves one exact version.
 
 ## 6. Build steps
 
 | # | Build | Done when |
 |---|---|---|
 | 1 | `config.json`, the front-matter parser, loading of `specs/`. Command `gf.py status` prints one line per spec: id, status, title | `status` lists the spec of section 4 |
-| 2 | Rules D1, D2, S1, S2. Command `gf.py check` | Scenarios 1 to 4 |
+| 2 | Rules D1, D2, S1, S2, S3. Command `gf.py check` | Scenarios 1 to 4, and 18 |
 | 3 | The tag scanner over `test_globs`. Rules T1, T2, T3 | Scenarios 5 to 7 |
-| 4 | The two hashes. Rules G1, G2 | Scenario 8, with the approval fields written by hand |
-| 5 | Command `gf.py approve <spec-id>`, described below | Scenarios 9 to 11 |
-| 6 | `gf.py check --ci [--base <ref>]` with rules C1, C2, G3, P1 | Scenarios 12 to 16 |
+| 4 | The two hashes. Rules G1, G2, G5, S4 | Scenario 8, with the approval fields written by hand, and 19 |
+| 5 | Command `gf.py approve <id>`, described below. Rule D3 | Scenarios 9 to 11, and 20 to 22 |
+| 6 | `gf.py check --ci [--base <ref>]` with rules C1, C2, G3, P1, D4 | Scenarios 12 to 16, and 23 |
 | 7 | `gf.py verify`: runs `check`, then `test_command`, and fails if either fails | Scenario 17 |
 | 8 | `AGENTS.md` (the loop below, in your own words) and a CI job, described below | A person reads both |
 
@@ -151,9 +186,13 @@ A `draft` spec is checked for D and S rules only, plus G2 if it still has `locke
 - stdin or stdout is not a terminal;
 - one of the environment variables `CI`, `CLAUDECODE` or `GF_AGENT` is set;
 - `git config user.email` is not in `humans`;
-- the spec would fail `check` once approved, for example because a requirement has no test.
+- the spec would fail `check` once approved, for example because a requirement has no test;
+- the spec holds an open question;
+- the ticket is large and its design is not approved.
 
-Otherwise ask the person to type the spec id, and stop if it does not match. Then write `status: approved`, `approved_by`, `approved_spec_sha` and `locked_tests` into the front matter. The person commits the file themselves.
+Otherwise ask the person to type the spec id, and stop if it does not match. Then write `status: approved`, `approved_by`, `approved_via: git`, `approved_spec_sha` and `locked_tests` into the front matter. The person commits the file themselves.
+
+`approve <TICKET>` approves that ticket's `design.md` in the same way: the same refusals, except the last, and it writes `approved_design_sha` and no `locked_tests`.
 
 **The CI job, step 8.** CI must not run the checker that the pull request brings, or a pull request could rewrite its own judge. Take the checker from the source branch:
 
@@ -167,11 +206,12 @@ GF_ROOT="$PWD" python3 /tmp/gf/.gf/gf.py check --ci
 
 **The loop that `AGENTS.md` describes.**
 1. A ticket becomes a folder in `specs/` with a `story.md`.
-2. The agent drafts small specs and one tagged test per requirement, runs `check`, and stops.
-3. A person reads them and runs `approve`. This is gate 1.
-4. The agent writes code inside the spec's scope. Every commit names its spec.
-5. `verify` is green. A person reviews and merges. This is gate 2.
-6. The agent never runs `approve`, never writes the approval fields, and never edits `.gf/` or the CI files.
+2. For a large ticket the agent drafts `design.md` and stops. A person approves it.
+3. The agent drafts small specs and one tagged test per requirement, runs `check`, and stops. What it is unsure about becomes an open question, not a guess.
+4. A person reads them and runs `approve`. This is gate 1.
+5. The agent reads the skills the spec names, then writes code inside the spec's scope. Every commit names its spec.
+6. `verify` is green. A person reviews and merges. This is gate 2.
+7. The agent never runs `approve`, never writes the approval fields, and never edits `.gf/`, `skills/`, the estimate or the CI files.
 
 ## 7. Self-test
 
@@ -196,16 +236,25 @@ GF_ROOT="$PWD" python3 /tmp/gf/.gf/gf.py check --ci
 | 15 | The approval committed by an address in `agent_authors` | G3 |
 | 16 | `.gf/gf.py` changed by an address in `agent_authors` | P1 |
 | 17 | The code missing, so the tests fail | `verify` exits 1 |
+| 18 | A spec with `skills: [nope]` and no such skill | S3 |
+| 19 | An approved spec with `approved_via: tracker` while `gates` is `["git"]` | G5 |
+| 20 | A draft spec with an open question | `check` OK, `approve` exits 1 |
+| 21 | `points: 5`, no design, `approve` of a spec | exit 1, spec still `draft` |
+| 22 | The design approved, then the spec; then one word changed in the design | approvals succeed, then D3 |
+| 23 | `points` changed from 5 to 2 by an address in `agent_authors` | D4 |
 
 ## 8. Out of scope
 
 Leave these out of the first build. Each one can be added later as a spec of its own:
 - a budget per ticket and cost reporting in commits;
-- reading the ticket from Jira or another tracker;
+- reading the ticket and its estimate from Jira or another tracker;
+- a second gate, such as an approving comment in the tracker;
 - proof from a JUnit report that the locked tests really ran;
 - signed commits as proof of who approved;
-- tickets that span several repositories.
+- tickets that span several repositories, and one design shared by them.
 
-## 9. Known limit
+## 9. Known limits
 
-"A person" means a git author email, and anyone can type an email into git. For real identity, also require a code owner's review on every change under `specs/` and `.gf/`.
+- "A person" means a git author email, and anyone can type an email into git. For real identity, also require a code owner's review on every change under `specs/` and `.gf/`, or add a gate whose proof lives where identity is real.
+- The checker verifies that a named skill exists, not that the agent followed it. The tests do that.
+- An open question blocks approval only once someone wrote it down. Nothing finds an ambiguity by itself.
