@@ -147,8 +147,8 @@ Local rules run on the files. Git rules run only with `--ci`, on the commits bet
 | Code | Where | Fails when |
 |---|---|---|
 | D1 | local | A `specs/` folder has no `story.md`, its `ticket` does not match `ticket_pattern`, a spec file is not listed under `## Specs`, or a spec id does not start with the folder's ticket |
-| D3 | local | A large ticket has a spec that is `approved` or `done`, and its `design.md` is missing, not approved, or changed after approval. Or a `design.md` lacks a section |
 | D2 | local | `size` is not in `sizes`, there are more than `max_requirements` requirements or more than `max_scope` scope entries, or a scope entry starts with `*` |
+| D3 | local | A large ticket has a spec that is `approved` or `done`, and its `design.md` is missing, not approved, or changed after approval. Or a `design.md` lacks a section |
 | S1 | local | Intent, Non-goals, Edge cases or Requirements is missing or empty, or Edge cases comes after Requirements |
 | S2 | local | A requirement does not have the form of section 4, or two requirements share a number |
 | S3 | local | A spec names a skill that does not exist in `skills_dirs` |
